@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useEffect, memo } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 interface Giveaway {
   id: number;
@@ -13,7 +14,7 @@ interface Giveaway {
   badge: string;
 }
 
-const giveaways: Giveaway[] = [
+const DEFAULT_GIVEAWAYS: Giveaway[] = [
   {
     id: 1,
     title: 'Win a 2025 Model 3 Long Range',
@@ -120,6 +121,27 @@ const GiveawayCard = memo(function GiveawayCard({ g, idx }: { g: Giveaway; idx: 
 });
 
 export default function GiveawaysSection() {
+  const [giveaways, setGiveaways] = useState<Giveaway[]>(DEFAULT_GIVEAWAYS);
+
+  useEffect(() => {
+    async function loadGiveaways() {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from('site_settings')
+          .select('value')
+          .eq('key', 'giveaways')
+          .single();
+        if (data?.value && Array.isArray(data.value) && data.value.length > 0) {
+          setGiveaways(data.value as Giveaway[]);
+        }
+      } catch {
+        // fallback to defaults already shown
+      }
+    }
+    loadGiveaways();
+  }, []);
+
   return (
     <section id="giveaways" className="relative z-10 py-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">

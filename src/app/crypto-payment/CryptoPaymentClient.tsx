@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import { createClient } from '@/lib/supabase/client';
 
-const CRYPTO_OPTIONS = [
+const DEFAULT_CRYPTO_OPTIONS = [
   {
     id: 'btc',
     name: 'Bitcoin',
@@ -63,6 +64,7 @@ export default function CryptoPaymentClient() {
   const packageName = searchParams.get('package') || 'Investment Package';
   const amount = searchParams.get('amount') || '0';
 
+  const [cryptoOptions, setCryptoOptions] = useState(DEFAULT_CRYPTO_OPTIONS);
   const [step, setStep] = useState<Step>('select');
   const [selectedCrypto, setSelectedCrypto] = useState<string>('');
   const [copied, setCopied] = useState(false);
@@ -71,7 +73,32 @@ export default function CryptoPaymentClient() {
   const [confirming, setConfirming] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30 * 60);
 
-  const crypto = CRYPTO_OPTIONS.find((c) => c.id === selectedCrypto);
+  // Load live wallet addresses from Supabase
+  useEffect(() => {
+    async function loadWallets() {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from('site_settings')
+          .select('value')
+          .eq('key', 'crypto_wallets')
+          .single();
+        if (data?.value) {
+          setCryptoOptions(prev =>
+            prev.map(opt => ({
+              ...opt,
+              address: data.value[opt.id] || opt.address,
+            }))
+          );
+        }
+      } catch {
+        // fallback to defaults already set
+      }
+    }
+    loadWallets();
+  }, []);
+
+  const crypto = cryptoOptions.find((c) => c.id === selectedCrypto);
 
   useEffect(() => {
     if (step !== 'send') return;
@@ -172,7 +199,7 @@ export default function CryptoPaymentClient() {
             <div>
               <p className="text-xs text-[#666666] uppercase tracking-widest mb-5">Select your preferred cryptocurrency</p>
               <div className="space-y-3 mb-8">
-                {CRYPTO_OPTIONS.map((c) => (
+                {cryptoOptions.map((c) => (
                   <button
                     key={c.id}
                     onClick={() => setSelectedCrypto(c.id)}
