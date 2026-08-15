@@ -128,7 +128,10 @@ export default function AccountPage() {
 
   useEffect(() => {
     setMounted(true);
+    let cancelled = false;
+
     supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (cancelled) return;
       if (!user) {
         router.push('/login');
         return;
@@ -141,6 +144,7 @@ export default function AccountPage() {
       setInitials(parts.map((p: string) => p[0]).join('').toUpperCase().slice(0, 2));
 
       await loadAllData(user.id, user.email || '');
+      if (cancelled) return;
       setLoading(false);
 
       // Real-time portfolio subscription
@@ -198,8 +202,10 @@ export default function AccountPage() {
     });
 
     return () => {
+      cancelled = true;
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
     };
   }, []);
