@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
-type Tab = 'overview' | 'kyc' | 'portfolio' | 'withdrawals' | 'transactions' | 'referrals';
+type Tab = 'overview' | 'kyc' | 'portfolio' | 'balance' | 'withdrawals' | 'transactions' | 'referrals';
 
 interface KYCData {
   kyc_status: 'pending' | 'under_review' | 'approved' | 'rejected' | null;
@@ -49,6 +49,26 @@ interface PortfolioData {
   };
 }
 
+interface BalanceData {
+  available_balance: number;
+  total_deposited: number;
+  total_withdrawn: number;
+  total_returns: number;
+}
+
+interface BalanceTx {
+  id: string;
+  type: string;
+  amount: number;
+  status: string;
+  description: string | null;
+  payment_method: string | null;
+  wallet_address: string | null;
+  bank_name: string | null;
+  account_number: string | null;
+  created_at: string;
+}
+
 interface WithdrawalRequest {
   id: string;
   amount: number;
@@ -91,6 +111,18 @@ export default function AccountPage() {
   const [kyc, setKyc] = useState<KYCData | null>(null);
   const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [balance, setBalance] = useState<BalanceData | null>(null);
+  const [balanceTxs, setBalanceTxs] = useState<BalanceTx[]>([]);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositMethod, setDepositMethod] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawMethod, setWithdrawMethod] = useState('');
+  const [withdrawWallet, setWithdrawWallet] = useState('');
+  const [withdrawBank, setWithdrawBank] = useState('');
+  const [withdrawAccount, setWithdrawAccount] = useState('');
+  const [withdrawAccountName, setWithdrawAccountName] = useState('');
+  const [balanceActionMsg, setBalanceActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const channelRef = useRef<any>(null);
 
@@ -206,8 +238,94 @@ export default function AccountPage() {
         .eq('user_id', uid)
         .order('requested_at', { ascending: false });
       setWithdrawals(withdrawalData || []);
+
+      // Balance
+      const { data: balanceRow } = await supabase
+        .from('user_balance')
+        .select('*')
+        .eq('user_id', uid)
+        .maybeSingle();
+      setBalance(balanceRow || null);
+
+      // Balance transactions
+      const { data: balanceTxData } = await supabase
+        .from('balance_transactions')
+        .select('*')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setBalanceTxs(balanceTxData || []);
     } catch (err) {
       console.error('Account data load error:', err);
+    }
+  }
+
+  async function handleDeposit() {
+    if (!depositAmount || Number(depositAmount) <= 0 || !depositMethod) return;
+    setBalanceLoading(true);
+    setBalanceActionMsg(null);
+    try {
+      const { error } = await supabase.from('balance_transactions').insert({
+        user_id: userId,
+        type: 'deposit',
+        amount: Number(depositAmount),
+        status: 'pending',
+        description: 'Manual deposit',
+        payment_method: depositMethod,
+      });
+      if (error) throw error;
+      setBalanceActionMsg({ type: 'success', text: 'Deposit request submitted. Funds will be credited after admin confirmation.' });
+      setDepositAmount('');
+      setDepositMethod('');
+      // Refresh balance txs
+      const { data } = await supabase.from('balance_transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50);
+      setBalanceTxs(data || []);
+    } catch (err: any) {
+      setBalanceActionMsg({ type: 'error', text: err.message || 'Failed to submit deposit.' });
+    } finally {
+      setBalanceLoading(false);
+    }
+  }
+
+  async function handleWithdraw() {
+    const avail = balance?.available_balance || 0;
+    if (!withdrawAmount || Number(withdrawAmount) <= 0) return;
+    if (Number(withdrawAmount) > avail) {
+      setBalanceActionMsg({ type: 'error', text: 'Withdrawal amount exceeds available balance.' });
+      return;
+    }
+    if (!withdrawMethod) {
+      setBalanceActionMsg({ type: 'error', text: 'Please select a withdrawal method.' });
+      return;
+    }
+    setBalanceLoading(true);
+    setBalanceActionMsg(null);
+    try {
+      const { error } = await supabase.from('balance_transactions').insert({
+        user_id: userId,
+        type: 'withdrawal',
+        amount: Number(withdrawAmount),
+        status: 'pending',
+        description: 'Balance withdrawal',
+        payment_method: withdrawMethod,
+        wallet_address: withdrawMethod === 'crypto' ? withdrawWallet : null,
+        bank_name: withdrawMethod === 'bank' ? withdrawBank : null,
+        account_number: withdrawMethod === 'bank' ? withdrawAccount : null,
+        account_name: withdrawMethod === 'bank' ? withdrawAccountName : null,
+      });
+      if (error) throw error;
+      setBalanceActionMsg({ type: 'success', text: 'Withdrawal request submitted. Processing within 1–3 business days.' });
+      setWithdrawAmount('');
+      setWithdrawWallet('');
+      setWithdrawBank('');
+      setWithdrawAccount('');
+      setWithdrawAccountName('');
+      const { data } = await supabase.from('balance_transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50);
+      setBalanceTxs(data || []);
+    } catch (err: any) {
+      setBalanceActionMsg({ type: 'error', text: err.message || 'Failed to submit withdrawal.' });
+    } finally {
+      setBalanceLoading(false);
     }
   }
 
@@ -218,6 +336,7 @@ export default function AccountPage() {
     { id: 'overview', label: 'Overview' },
     { id: 'kyc', label: 'KYC Status' },
     { id: 'portfolio', label: 'Portfolio' },
+    { id: 'balance', label: 'Balance' },
     { id: 'withdrawals', label: 'Withdrawals' },
     { id: 'transactions', label: 'Transactions' },
     { id: 'referrals', label: 'Referrals' },
@@ -670,6 +789,225 @@ export default function AccountPage() {
                     <p className="text-[#444444] text-xs mt-1">Your transaction history will appear here once activity is recorded.</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* BALANCE TAB */}
+            {activeTab === 'balance' && (
+              <div className="space-y-6">
+                {/* Balance summary cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Available Balance', value: `$${(balance?.available_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: '#4ade80' },
+                    { label: 'Total Deposited', value: `$${(balance?.total_deposited || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: '#60a5fa' },
+                    { label: 'Investment Returns', value: `$${(balance?.total_returns || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: '#facc15' },
+                    { label: 'Total Withdrawn', value: `$${(balance?.total_withdrawn || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: '#f87171' },
+                  ].map((s) => (
+                    <div key={s.label} className="bg-[#111111] border border-[#1A1A1A] rounded-xl p-5">
+                      <p className="text-[11px] text-[#555555] tracking-widest uppercase mb-2">{s.label}</p>
+                      <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Action message */}
+                {balanceActionMsg && (
+                  <div className={`p-4 rounded-lg border text-xs font-medium ${balanceActionMsg.type === 'success' ? 'bg-green-400/5 border-green-400/20 text-green-400' : 'bg-red-400/5 border-red-400/20 text-red-400'}`}>
+                    {balanceActionMsg.text}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Deposit */}
+                  <div className="bg-[#111111] border border-[#1A1A1A] rounded-xl p-6 space-y-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-white tracking-widest uppercase mb-1">Deposit Funds</h3>
+                      <p className="text-xs text-[#555555]">Add funds to your balance freely — no plan required</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Amount (USD)</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#555555] font-bold text-sm">$</span>
+                        <input
+                          type="number"
+                          value={depositAmount}
+                          onChange={(e) => setDepositAmount(e.target.value)}
+                          placeholder="0.00"
+                          min="1"
+                          className="w-full pl-8 pr-4 py-3 rounded text-sm input-tesla"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Payment Method</label>
+                      <div className="space-y-2">
+                        {[
+                          { id: 'crypto', label: 'Cryptocurrency', icon: '₿' },
+                          { id: 'wire', label: 'Bank Wire', icon: '🏦' },
+                          { id: 'card', label: 'Card', icon: '💳' },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setDepositMethod(m.id)}
+                            className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all text-xs ${depositMethod === m.id ? 'border-primary bg-primary/5 text-white' : 'border-[#1A1A1A] text-[#888888] hover:border-[#2A2A2A]'}`}
+                          >
+                            <span>{m.icon}</span>
+                            <span className="font-semibold">{m.label}</span>
+                            {depositMethod === m.id && <span className="ml-auto text-primary">✓</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleDeposit}
+                      disabled={balanceLoading || !depositAmount || Number(depositAmount) <= 0 || !depositMethod}
+                      className="w-full py-3 tesla-btn-primary rounded text-xs font-bold tracking-widest uppercase disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {balanceLoading ? 'Processing...' : 'Submit Deposit Request'}
+                    </button>
+                  </div>
+
+                  {/* Withdraw */}
+                  <div className="bg-[#111111] border border-[#1A1A1A] rounded-xl p-6 space-y-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-white tracking-widest uppercase mb-1">Withdraw Funds</h3>
+                      <p className="text-xs text-[#555555]">Withdraw from your available balance to wallet or bank</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Amount (USD)</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#555555] font-bold text-sm">$</span>
+                        <input
+                          type="number"
+                          value={withdrawAmount}
+                          onChange={(e) => setWithdrawAmount(e.target.value)}
+                          placeholder="0.00"
+                          min="1"
+                          max={balance?.available_balance || 0}
+                          className="w-full pl-8 pr-4 py-3 rounded text-sm input-tesla"
+                        />
+                      </div>
+                      <p className="text-[11px] text-[#555555] mt-1">Available: <span className="text-white font-semibold">${(balance?.available_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Withdrawal Method</label>
+                      <div className="space-y-2">
+                        {[
+                          { id: 'crypto', label: 'Crypto Wallet', icon: '₿' },
+                          { id: 'bank', label: 'Bank Account', icon: '🏦' },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setWithdrawMethod(m.id)}
+                            className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all text-xs ${withdrawMethod === m.id ? 'border-primary bg-primary/5 text-white' : 'border-[#1A1A1A] text-[#888888] hover:border-[#2A2A2A]'}`}
+                          >
+                            <span>{m.icon}</span>
+                            <span className="font-semibold">{m.label}</span>
+                            {withdrawMethod === m.id && <span className="ml-auto text-primary">✓</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {withdrawMethod === 'crypto' && (
+                      <div>
+                        <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Wallet Address</label>
+                        <input
+                          type="text"
+                          value={withdrawWallet}
+                          onChange={(e) => setWithdrawWallet(e.target.value)}
+                          placeholder="0x... or bc1..."
+                          className="w-full px-4 py-3 rounded text-sm input-tesla font-mono"
+                        />
+                      </div>
+                    )}
+                    {withdrawMethod === 'bank' && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Bank Name</label>
+                          <input type="text" value={withdrawBank} onChange={(e) => setWithdrawBank(e.target.value)} placeholder="Bank name" className="w-full px-4 py-3 rounded text-sm input-tesla" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Account Number</label>
+                          <input type="text" value={withdrawAccount} onChange={(e) => setWithdrawAccount(e.target.value)} placeholder="Account number" className="w-full px-4 py-3 rounded text-sm input-tesla" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#888888] uppercase tracking-widest mb-2">Account Name</label>
+                          <input type="text" value={withdrawAccountName} onChange={(e) => setWithdrawAccountName(e.target.value)} placeholder="Account holder name" className="w-full px-4 py-3 rounded text-sm input-tesla" />
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      onClick={handleWithdraw}
+                      disabled={balanceLoading || !withdrawAmount || Number(withdrawAmount) <= 0 || !withdrawMethod}
+                      className="w-full py-3 rounded text-xs font-bold tracking-widest uppercase disabled:opacity-40 disabled:cursor-not-allowed border border-[#2A2A2A] text-white hover:border-primary/50 hover:bg-primary/5 transition-all"
+                    >
+                      {balanceLoading ? 'Processing...' : 'Submit Withdrawal Request'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Balance transaction history */}
+                <div className="bg-[#111111] border border-[#1A1A1A] rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-[#1A1A1A]">
+                    <p className="text-xs font-semibold text-white tracking-widest uppercase">Balance History</p>
+                  </div>
+                  {balanceTxs.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-[#1A1A1A]">
+                            {['Date', 'Type', 'Description', 'Amount', 'Status'].map((h) => (
+                              <th key={h} className="px-5 py-3 text-left text-[10px] text-[#555555] tracking-widest uppercase font-medium">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#1A1A1A]">
+                          {balanceTxs.map((tx) => {
+                            const isCredit = tx.type === 'deposit' || tx.type === 'investment_return';
+                            const typeLabels: Record<string, string> = {
+                              deposit: 'Deposit',
+                              withdrawal: 'Withdrawal',
+                              investment_return: 'Investment Return',
+                              investment_debit: 'Investment',
+                            };
+                            const statusColors: Record<string, string> = {
+                              pending: '#facc15',
+                              processing: '#60a5fa',
+                              completed: '#4ade80',
+                              rejected: '#f87171',
+                            };
+                            return (
+                              <tr key={tx.id} className="hover:bg-[#0D0D0D] transition-colors">
+                                <td className="px-5 py-4 text-sm text-[#AAAAAA] whitespace-nowrap">{new Date(tx.created_at).toLocaleDateString()}</td>
+                                <td className="px-5 py-4">
+                                  <span className={`px-2 py-1 rounded text-[10px] font-semibold ${isCredit ? 'bg-[#4ade80]/10 text-[#4ade80]' : 'bg-[#f87171]/10 text-[#f87171]'}`}>
+                                    {typeLabels[tx.type] || tx.type}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-4 text-sm text-[#AAAAAA]">{tx.description || '—'}</td>
+                                <td className="px-5 py-4">
+                                  <span className={`text-sm font-semibold ${isCredit ? 'text-[#4ade80]' : 'text-[#f87171]'}`}>
+                                    {isCredit ? '+' : '-'}${Number(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-4">
+                                  <span className="px-2 py-1 rounded text-[10px] font-semibold" style={{ color: statusColors[tx.status] || '#888', background: `${statusColors[tx.status] || '#888'}18` }}>
+                                    {tx.status.charAt(0).toUpperCase() + tx.status.slice(1)}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="py-16 text-center">
+                      <p className="text-[#555555] text-sm">No balance transactions yet.</p>
+                      <p className="text-[#444444] text-xs mt-1">Deposits, withdrawals, and investment returns will appear here.</p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

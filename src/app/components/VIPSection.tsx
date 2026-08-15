@@ -1,5 +1,6 @@
 import React from 'react';
 import AppImage from '@/components/ui/AppImage';
+import Link from 'next/link';
 
 export default function VIPSection() {
   return (
@@ -72,13 +73,14 @@ export default function VIPSection() {
                 ))}
               </div>
 
-              <button
+              <Link
+                href="/book-session"
                 className="inline-flex items-center gap-2 px-10 py-4 bg-accent text-accent-foreground font-extrabold rounded-xl btn-shimmer text-sm transition-all duration-300 hover:-translate-y-0.5 min-h-[52px]"
                 style={{ boxShadow: '0 0 30px rgba(227,25,55,0.3)' }}
               >
                 Apply for an Appointment
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-              </button>
+              </Link>
             </div>
           </div>
         </div>
