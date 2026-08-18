@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { getCurrentUser, isAdmin } from '@/lib/portfolioStore';
 import { createClient } from '@/lib/supabase/client';
 
-type SettingsTab = 'platform' | 'security' | 'customercare' | 'email';
+type SettingsTab = 'platform' | 'security' | 'customercare' | 'email' | 'payments' | 'giveaways';
 
 interface PlatformSettings {
   withdrawalMinAmount: string;
@@ -52,6 +52,24 @@ interface EmailTemplateSettings {
   withdrawalBody: string;
   senderName: string;
   senderEmail: string;
+}
+
+interface CryptoWallets {
+  btc: string;
+  eth: string;
+  usdt: string;
+}
+
+interface GiveawayEntry {
+  id: number;
+  title: string;
+  description: string;
+  prize: string;
+  ends: string;
+  entryFee: string;
+  entries: number;
+  maxEntries: number;
+  badge: string;
 }
 
 const DEFAULT_PLATFORM: PlatformSettings = {
@@ -102,6 +120,37 @@ const DEFAULT_EMAIL: EmailTemplateSettings = {
   senderEmail: 'noreply@teslatrade.com',
 };
 
+const DEFAULT_CRYPTO_WALLETS: CryptoWallets = {
+  btc: '1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf6',
+  eth: '0x742d35Cc6634C0532925a3b8D4C9C4e8b1e2F3A4',
+  usdt: 'TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE',
+};
+
+const DEFAULT_GIVEAWAYS: GiveawayEntry[] = [
+  {
+    id: 1,
+    title: 'Win a 2025 Model 3 Long Range',
+    description: '2025 Tesla Model 3 Long Range AWD. One winner selected after campaign ends. Includes standard delivery within the continental US.',
+    prize: '2025 Tesla Model 3 Long Range AWD',
+    ends: '2026-12-31',
+    entryFee: 'Free with any inventory inquiry',
+    entries: 1247,
+    maxEntries: 5000,
+    badge: 'FREE ENTRY',
+  },
+  {
+    id: 2,
+    title: 'Cybertruck Experience Weekend',
+    description: 'Win a full weekend with a Cybertruck Foundation Series plus a $2,000 platform credit toward any purchase.',
+    prize: 'Cybertruck Foundation Series + $2,000 credit',
+    ends: '2026-10-15',
+    entryFee: '$25 entry',
+    entries: 683,
+    maxEntries: 2000,
+    badge: '$25 ENTRY',
+  },
+];
+
 const STORAGE_KEYS = {
   platform: 'admin_settings_platform',
   security: 'admin_settings_security',
@@ -122,6 +171,16 @@ export default function AdminSettingsPage() {
   const [security, setSecurity] = useState<SecuritySettings>(DEFAULT_SECURITY);
   const [customerCare, setCustomerCare] = useState<CustomerCareSettings>(DEFAULT_CUSTOMER_CARE);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplateSettings>(DEFAULT_EMAIL);
+
+  const [cryptoWallets, setCryptoWallets] = useState<CryptoWallets>(DEFAULT_CRYPTO_WALLETS);
+  const [walletsLoading, setWalletsLoading] = useState(false);
+  const [walletsError, setWalletsError] = useState('');
+
+  const [giveaways, setGiveaways] = useState<GiveawayEntry[]>(DEFAULT_GIVEAWAYS);
+  const [giveawaysLoading, setGiveawaysLoading] = useState(false);
+  const [giveawaysError, setGiveawaysError] = useState('');
+  const [editingGiveaway, setEditingGiveaway] = useState<GiveawayEntry | null>(null);
+  const [addingGiveaway, setAddingGiveaway] = useState(false);
 
   // Password change state
   const [pwForm, setPwForm] = useState({ current: '', newPw: '', confirm: '' });
@@ -145,8 +204,93 @@ export default function AdminSettingsPage() {
         const savedEmail = localStorage.getItem(STORAGE_KEYS.email);
         if (savedEmail) setEmailTemplates(JSON.parse(savedEmail));
       } catch {}
+      // Load crypto wallets and giveaways from Supabase
+      loadCryptoWallets();
+      loadGiveaways();
     }
   }, []);
+
+  async function loadCryptoWallets() {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('site_settings')
+        .select('value')
+        .eq('key', 'crypto_wallets')
+        .single();
+      if (data?.value) {
+        setCryptoWallets({
+          btc: data.value.btc || DEFAULT_CRYPTO_WALLETS.btc,
+          eth: data.value.eth || DEFAULT_CRYPTO_WALLETS.eth,
+          usdt: data.value.usdt || DEFAULT_CRYPTO_WALLETS.usdt,
+        });
+      }
+    } catch {}
+  }
+
+  async function loadGiveaways() {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('site_settings')
+        .select('value')
+        .eq('key', 'giveaways')
+        .single();
+      if (data?.value && Array.isArray(data.value)) {
+        setGiveaways(data.value as GiveawayEntry[]);
+      }
+    } catch {}
+  }
+
+  async function saveCryptoWallets() {
+    setWalletsLoading(true);
+    setWalletsError('');
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('site_settings')
+        .upsert({ key: 'crypto_wallets', value: cryptoWallets, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+      if (error) throw error;
+      setSaved('payments');
+      setTimeout(() => setSaved(null), 2500);
+    } catch (err: unknown) {
+      setWalletsError(err instanceof Error ? err.message : 'Failed to save wallet addresses.');
+    }
+    setWalletsLoading(false);
+  }
+
+  async function saveGiveaways(updated: GiveawayEntry[]) {
+    setGiveawaysLoading(true);
+    setGiveawaysError('');
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('site_settings')
+        .upsert({ key: 'giveaways', value: updated, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+      if (error) throw error;
+      setGiveaways(updated);
+      setEditingGiveaway(null);
+      setAddingGiveaway(false);
+      setSaved('giveaways');
+      setTimeout(() => setSaved(null), 2500);
+    } catch (err: unknown) {
+      setGiveawaysError(err instanceof Error ? err.message : 'Failed to save giveaways.');
+    }
+    setGiveawaysLoading(false);
+  }
+
+  function deleteGiveaway(id: number) {
+    const updated = giveaways.filter(g => g.id !== id);
+    saveGiveaways(updated);
+  }
+
+  function upsertGiveaway(entry: GiveawayEntry) {
+    const exists = giveaways.find(g => g.id === entry.id);
+    const updated = exists
+      ? giveaways.map(g => g.id === entry.id ? entry : g)
+      : [...giveaways, { ...entry, id: Date.now() }];
+    saveGiveaways(updated);
+  }
 
   async function handlePasswordChange(e: React.FormEvent) {
     e.preventDefault();
@@ -301,7 +445,7 @@ export default function AdminSettingsPage() {
       <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-extrabold text-white tracking-tight mb-1">Platform Settings</h1>
-          <p className="text-sm text-[#555555]">Configure withdrawal limits, commissions, KYC rules, security, and customer care.</p>
+          <p className="text-sm text-[#555555]">Configure withdrawal limits, commissions, KYC rules, security, customer care, payment wallets, and giveaways.</p>
         </div>
 
         {/* Tabs */}
@@ -309,6 +453,14 @@ export default function AdminSettingsPage() {
           <button className={tabClass('platform')} onClick={() => setActiveTab('platform')}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
             Platform
+          </button>
+          <button className={tabClass('payments')} onClick={() => setActiveTab('payments')}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+            Payments
+          </button>
+          <button className={tabClass('giveaways')} onClick={() => setActiveTab('giveaways')}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+            Giveaways
           </button>
           <button className={tabClass('security')} onClick={() => setActiveTab('security')}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -323,6 +475,272 @@ export default function AdminSettingsPage() {
             Email Templates
           </button>
         </div>
+
+        {/* ── PAYMENTS TAB ── */}
+        {activeTab === 'payments' && (
+          <div className="space-y-6">
+            <div className="bg-[#0D0D0D] border border-[#1A1A1A] rounded-xl p-5 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-[#F7931A]/10 flex items-center justify-center shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F7931A" strokeWidth="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white mb-0.5">Crypto Payment Wallets</p>
+                <p className="text-xs text-[#555555]">Set the destination wallet addresses for Bitcoin, Ethereum, and USDT payments. These addresses are shown live on the crypto payment page.</p>
+              </div>
+            </div>
+
+            {walletsError && (
+              <div className="px-4 py-3 rounded-lg bg-primary/10 border border-primary/30 text-sm text-primary">{walletsError}</div>
+            )}
+
+            {/* Bitcoin */}
+            <div className={sectionClass}>
+              <p className={sectionTitleClass}>
+                <span className="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style={{ background: 'rgba(247,147,26,0.12)', border: '1px solid rgba(247,147,26,0.3)', color: '#F7931A' }}>₿</span>
+                Bitcoin (BTC)
+              </p>
+              <div>
+                <label className={labelClass}>BTC Wallet Address — Bitcoin Network</label>
+                <input
+                  type="text"
+                  value={cryptoWallets.btc}
+                  onChange={e => setCryptoWallets(w => ({ ...w, btc: e.target.value }))}
+                  className={inputClass + ' font-mono text-xs'}
+                  placeholder="1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf6"
+                />
+                <p className="text-[10px] text-[#444444] mt-1.5">Accepts native BTC on the Bitcoin mainnet. Verify address carefully before saving.</p>
+              </div>
+              {cryptoWallets.btc && (
+                <div className="p-3 bg-[#F7931A]/5 border border-[#F7931A]/20 rounded-lg">
+                  <p className="text-[11px] text-[#888888]">Live address: <span className="text-[#F7931A] font-mono text-[10px] break-all">{cryptoWallets.btc}</span></p>
+                </div>
+              )}
+            </div>
+
+            {/* Ethereum */}
+            <div className={sectionClass}>
+              <p className={sectionTitleClass}>
+                <span className="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style={{ background: 'rgba(98,126,234,0.12)', border: '1px solid rgba(98,126,234,0.3)', color: '#627EEA' }}>Ξ</span>
+                Ethereum (ETH)
+              </p>
+              <div>
+                <label className={labelClass}>ETH Wallet Address — ERC-20 Network</label>
+                <input
+                  type="text"
+                  value={cryptoWallets.eth}
+                  onChange={e => setCryptoWallets(w => ({ ...w, eth: e.target.value }))}
+                  className={inputClass + ' font-mono text-xs'}
+                  placeholder="0x742d35Cc6634C0532925a3b8D4C9C4e8b1e2F3A4"
+                />
+                <p className="text-[10px] text-[#444444] mt-1.5">Accepts ETH and ERC-20 tokens on Ethereum mainnet. Must start with 0x.</p>
+              </div>
+              {cryptoWallets.eth && (
+                <div className="p-3 bg-[#627EEA]/5 border border-[#627EEA]/20 rounded-lg">
+                  <p className="text-[11px] text-[#888888]">Live address: <span className="text-[#627EEA] font-mono text-[10px] break-all">{cryptoWallets.eth}</span></p>
+                </div>
+              )}
+            </div>
+
+            {/* USDT */}
+            <div className={sectionClass}>
+              <p className={sectionTitleClass}>
+                <span className="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style={{ background: 'rgba(38,161,123,0.12)', border: '1px solid rgba(38,161,123,0.3)', color: '#26A17B' }}>₮</span>
+                Tether USDT (TRC-20)
+              </p>
+              <div>
+                <label className={labelClass}>USDT Wallet Address — TRC-20 (Tron) Network</label>
+                <input
+                  type="text"
+                  value={cryptoWallets.usdt}
+                  onChange={e => setCryptoWallets(w => ({ ...w, usdt: e.target.value }))}
+                  className={inputClass + ' font-mono text-xs'}
+                  placeholder="TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE"
+                />
+                <p className="text-[10px] text-[#444444] mt-1.5">Accepts USDT on the Tron (TRC-20) network. Tron addresses start with T.</p>
+              </div>
+              {cryptoWallets.usdt && (
+                <div className="p-3 bg-[#26A17B]/5 border border-[#26A17B]/20 rounded-lg">
+                  <p className="text-[11px] text-[#888888]">Live address: <span className="text-[#26A17B] font-mono text-[10px] break-all">{cryptoWallets.usdt}</span></p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <p className="text-xs text-amber-300/80 leading-relaxed">
+                  <strong className="text-amber-300">Important:</strong> Double-check all wallet addresses before saving. Incorrect addresses will result in permanent loss of customer funds. Changes take effect immediately on the payment page.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={saveCryptoWallets}
+                disabled={walletsLoading}
+                className="px-8 py-3 tesla-btn-primary rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {walletsLoading ? (
+                  <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving...</>
+                ) : saved === 'payments' ? (
+                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>Saved!</>
+                ) : 'Save Wallet Addresses'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── GIVEAWAYS TAB ── */}
+        {activeTab === 'giveaways' && (
+          <div className="space-y-6">
+            <div className="bg-[#0D0D0D] border border-[#1A1A1A] rounded-xl p-5 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-accent" aria-hidden="true"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white mb-0.5">Giveaway Management</p>
+                <p className="text-xs text-[#555555]">Add, edit, or remove giveaway entries. Changes reflect immediately on the homepage giveaway section.</p>
+              </div>
+            </div>
+
+            {giveawaysError && (
+              <div className="px-4 py-3 rounded-lg bg-primary/10 border border-primary/30 text-sm text-primary">{giveawaysError}</div>
+            )}
+
+            {saved === 'giveaways' && (
+              <div className="px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/30 text-sm text-green-400 flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>
+                Giveaways updated — changes are live on the homepage!
+              </div>
+            )}
+
+            {/* Giveaway list */}
+            <div className="space-y-4">
+              {giveaways.map((g) => (
+                <div key={g.id} className="bg-[#0D0D0D] border border-[#1A1A1A] rounded-xl p-5">
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold tracking-widest uppercase bg-accent/15 text-accent border border-accent/30">{g.badge}</span>
+                      </div>
+                      <h3 className="text-sm font-bold text-white truncate">{g.title}</h3>
+                      <p className="text-xs text-[#555555] mt-0.5 line-clamp-2">{g.description}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setEditingGiveaway({ ...g })}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#111111] border border-[#2A2A2A] hover:border-primary/40 hover:text-primary text-[#888888] transition-all"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteGiveaway(g.id)}
+                        disabled={giveawaysLoading}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary/5 border border-primary/20 hover:bg-primary/10 text-primary transition-all disabled:opacity-40"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-[10px]">
+                    <div><span className="text-[#444444] uppercase tracking-widest">Ends</span><div className="text-white font-mono mt-0.5">{g.ends}</div></div>
+                    <div><span className="text-[#444444] uppercase tracking-widest">Entries</span><div className="text-white font-mono mt-0.5">{g.entries.toLocaleString()} / {g.maxEntries.toLocaleString()}</div></div>
+                    <div><span className="text-[#444444] uppercase tracking-widest">Entry Fee</span><div className="text-white mt-0.5">{g.entryFee}</div></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Add new giveaway button */}
+            {!addingGiveaway && !editingGiveaway && (
+              <button
+                onClick={() => {
+                  setAddingGiveaway(true);
+                  setEditingGiveaway({
+                    id: 0,
+                    title: '',
+                    description: '',
+                    prize: '',
+                    ends: '',
+                    entryFee: 'Free',
+                    entries: 0,
+                    maxEntries: 1000,
+                    badge: 'FREE ENTRY',
+                  });
+                }}
+                className="w-full py-3 border border-dashed border-[#2A2A2A] hover:border-primary/40 rounded-xl text-xs font-bold text-[#555555] hover:text-primary transition-all flex items-center justify-center gap-2"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add New Giveaway
+              </button>
+            )}
+
+            {/* Edit / Add form */}
+            {editingGiveaway && (
+              <div className={sectionClass + ' border-primary/30'}>
+                <p className={sectionTitleClass}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E31937" strokeWidth="2" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  {addingGiveaway ? 'Add New Giveaway' : 'Edit Giveaway'}
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <label className={labelClass}>Title</label>
+                    <input type="text" value={editingGiveaway.title} onChange={e => setEditingGiveaway(g => g ? { ...g, title: e.target.value } : g)} className={inputClass} placeholder="Win a 2025 Model 3..." />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Description</label>
+                    <textarea value={editingGiveaway.description} onChange={e => setEditingGiveaway(g => g ? { ...g, description: e.target.value } : g)} rows={3} className={inputClass + ' resize-none'} placeholder="Full giveaway description..." />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Prize</label>
+                    <input type="text" value={editingGiveaway.prize} onChange={e => setEditingGiveaway(g => g ? { ...g, prize: e.target.value } : g)} className={inputClass} placeholder="2025 Tesla Model 3 Long Range AWD" />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelClass}>End Date (YYYY-MM-DD)</label>
+                      <input type="date" value={editingGiveaway.ends} onChange={e => setEditingGiveaway(g => g ? { ...g, ends: e.target.value } : g)} className={inputClass} />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Badge Label</label>
+                      <input type="text" value={editingGiveaway.badge} onChange={e => setEditingGiveaway(g => g ? { ...g, badge: e.target.value } : g)} className={inputClass} placeholder="FREE ENTRY" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className={labelClass}>Entry Fee</label>
+                      <input type="text" value={editingGiveaway.entryFee} onChange={e => setEditingGiveaway(g => g ? { ...g, entryFee: e.target.value } : g)} className={inputClass} placeholder="Free / $25 entry" />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Current Entries</label>
+                      <input type="number" value={editingGiveaway.entries} onChange={e => setEditingGiveaway(g => g ? { ...g, entries: Number(e.target.value) } : g)} className={inputClass} placeholder="0" />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Max Entries</label>
+                      <input type="number" value={editingGiveaway.maxEntries} onChange={e => setEditingGiveaway(g => g ? { ...g, maxEntries: Number(e.target.value) } : g)} className={inputClass} placeholder="1000" />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => { setEditingGiveaway(null); setAddingGiveaway(false); }}
+                    className="flex-1 py-3 tesla-btn-outline rounded-lg text-sm font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => editingGiveaway && upsertGiveaway(editingGiveaway)}
+                    disabled={giveawaysLoading || !editingGiveaway?.title}
+                    className="flex-1 py-3 tesla-btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {giveawaysLoading ? (
+                      <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving...</>
+                    ) : addingGiveaway ? 'Add Giveaway' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── PLATFORM TAB ── */}
         {activeTab === 'platform' && (
@@ -406,7 +824,7 @@ export default function AdminSettingsPage() {
                 <div>
                   <label className={labelClass}>Referral Commission (%)</label>
                   <input type="number" step="0.1" value={platform.referralCommission} onChange={e => setPlatform(p => ({ ...p, referralCommission: e.target.value }))} className={inputClass} placeholder="5" />
-                  <p className="text-[10px] text-[#444444] mt-1.5">Paid to referrer on referred user's first investment</p>
+                  <p className="text-[10px] text-[#444444] mt-1.5">Paid to referrer on referred user&apos;s first investment</p>
                 </div>
               </div>
             </div>
@@ -517,7 +935,7 @@ export default function AdminSettingsPage() {
             <div className={sectionClass}>
               <p className={sectionTitleClass}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Session & Rate Limiting
+                Session &amp; Rate Limiting
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>

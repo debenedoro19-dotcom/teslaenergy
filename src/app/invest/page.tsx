@@ -281,8 +281,8 @@ export default function InvestPage() {
                           </li>
                         ))}
                       </ul>
-                      {pkgLocked && (
-                        <div className="mt-4 pt-3 border-t border-[#1A1A1A]">
+                      {pkgLocked ? (
+                        <div className="mt-2 pt-3 border-t border-[#1A1A1A]">
                           <Link
                             href="/kyc"
                             onClick={(e) => e.stopPropagation()}
@@ -290,6 +290,22 @@ export default function InvestPage() {
                           >
                             Complete KYC to unlock →
                           </Link>
+                        </div>
+                      ) : (
+                        <div
+                          className={`mt-2 pt-3 border-t border-[#1A1A1A] flex items-center justify-center py-2 rounded text-[10px] font-bold tracking-widest uppercase transition-all ${
+                            selected === pkg.id
+                              ? 'bg-primary text-white' :'bg-[#1A1A1A] text-[#888888] group-hover:bg-primary/10 group-hover:text-primary'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!pkgLocked) {
+                              setSelected(pkg.id);
+                              setStep('amount');
+                            }
+                          }}
+                        >
+                          {selected === pkg.id ? '✓ Selected — Continue' : 'Invest Now →'}
                         </div>
                       )}
                     </button>

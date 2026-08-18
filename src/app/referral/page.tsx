@@ -97,6 +97,8 @@ export default function ReferralPage() {
 
     const supabase = createClient();
 
+    let cancelled = false;
+
     async function fetchReferralData() {
       try {
         const { data: profileRow } = await supabase
@@ -117,6 +119,8 @@ export default function ReferralPage() {
           .eq('user_id', profileRow.id)
           .maybeSingle();
 
+        if (cancelled) return;
+
         if (portfolioRow?.referrals) {
           setReferralData(portfolioRow.referrals as ReferralData);
         }
@@ -129,12 +133,17 @@ export default function ReferralPage() {
           .eq('user_id', profileRow.id)
           .order('requested_at', { ascending: false });
 
+        if (cancelled) return;
+
         setWithdrawals((wdRows as WithdrawalRequest[]) || []);
         setWithdrawalsLoading(false);
 
+        // Guard: do not create channel if effect was already cleaned up
+        if (cancelled) return;
+
         // Real-time subscription for portfolio
         const channel = supabase
-          .channel(`referral_${profileRow.id}`)
+          .channel(`referral_${profileRow.id}_${Date.now()}`)
           .on(
             'postgres_changes',
             {
@@ -170,7 +179,9 @@ export default function ReferralPage() {
             }
           )
           .subscribe((status) => {
-            setRealtimeConnected(status === 'SUBSCRIBED');
+            if (!cancelled) {
+              setRealtimeConnected(status === 'SUBSCRIBED');
+            }
           });
 
         channelRef.current = channel;
@@ -184,6 +195,7 @@ export default function ReferralPage() {
     fetchReferralData();
 
     return () => {
+      cancelled = true;
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;

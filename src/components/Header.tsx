@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 const navLinks = [
   { label: 'Vehicles', href: '#inventory' },
@@ -16,11 +17,23 @@ const navLinks = [
 export default function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase?.auth?.getUser()?.then(({ data: { user } }) => {
+      setIsLoggedIn(!!user);
+    });
+    const { data: { subscription } } = supabase?.auth?.onAuthStateChange((_event, session) => {
+      setIsLoggedIn(!!session?.user);
+    });
+    return () => subscription?.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -87,19 +100,31 @@ export default function Header() {
 
           {/* Actions */}
           <div className="hidden lg:flex items-center gap-3">
-            <Link
-              href="/login"
-              className="px-5 py-2 text-xs font-semibold text-white border border-[#2A2A2A] rounded hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 tracking-widest uppercase"
-            >
-              Sign In
-            </Link>
-            <Link
-              href="/register"
-              className="px-5 py-2 text-xs font-bold bg-primary text-white rounded btn-shimmer hover:bg-accent transition-all duration-300 tracking-widest uppercase"
-              style={{ boxShadow: '0 0 20px rgba(227,25,55,0.4), 0 2px 8px rgba(0,0,0,0.4)' }}
-            >
-              Get Started
-            </Link>
+            {!isLoggedIn && (
+              <Link
+                href="/login"
+                className="px-5 py-2 text-xs font-semibold text-white border border-[#2A2A2A] rounded hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 tracking-widest uppercase"
+              >
+                Sign In
+              </Link>
+            )}
+            {isLoggedIn ? (
+              <Link
+                href="/dashboard"
+                className="px-5 py-2 text-xs font-bold bg-primary text-white rounded btn-shimmer hover:bg-accent transition-all duration-300 tracking-widest uppercase"
+                style={{ boxShadow: '0 0 20px rgba(227,25,55,0.4), 0 2px 8px rgba(0,0,0,0.4)' }}
+              >
+                Dashboard
+              </Link>
+            ) : (
+              <Link
+                href="/register"
+                className="px-5 py-2 text-xs font-bold bg-primary text-white rounded btn-shimmer hover:bg-accent transition-all duration-300 tracking-widest uppercase"
+                style={{ boxShadow: '0 0 20px rgba(227,25,55,0.4), 0 2px 8px rgba(0,0,0,0.4)' }}
+              >
+                Get Started
+              </Link>
+            )}
           </div>
 
           {/* Mobile Hamburger */}
@@ -145,12 +170,20 @@ export default function Header() {
             ))}
           </div>
           <div className="flex flex-col gap-3 pt-4 border-t border-[#1A1A1A]">
-            <Link href="/login" className="w-full py-3 text-center text-xs font-semibold text-white border border-[#2A2A2A] rounded tracking-widest uppercase min-h-[44px] flex items-center justify-center" onClick={() => setMenuOpen(false)}>
-              Sign In
-            </Link>
-            <Link href="/register" className="w-full py-3 text-center text-xs font-bold bg-primary text-white rounded tracking-widest uppercase min-h-[44px] flex items-center justify-center" style={{ boxShadow: '0 0 20px rgba(227,25,55,0.3)' }} onClick={() => setMenuOpen(false)}>
-              Get Started
-            </Link>
+            {!isLoggedIn && (
+              <Link href="/login" className="w-full py-3 text-center text-xs font-semibold text-white border border-[#2A2A2A] rounded tracking-widest uppercase min-h-[44px] flex items-center justify-center" onClick={() => setMenuOpen(false)}>
+                Sign In
+              </Link>
+            )}
+            {isLoggedIn ? (
+              <Link href="/dashboard" className="w-full py-3 text-center text-xs font-bold bg-primary text-white rounded tracking-widest uppercase min-h-[44px] flex items-center justify-center" style={{ boxShadow: '0 0 20px rgba(227,25,55,0.3)' }} onClick={() => setMenuOpen(false)}>
+                Dashboard
+              </Link>
+            ) : (
+              <Link href="/register" className="w-full py-3 text-center text-xs font-bold bg-primary text-white rounded tracking-widest uppercase min-h-[44px] flex items-center justify-center" style={{ boxShadow: '0 0 20px rgba(227,25,55,0.3)' }} onClick={() => setMenuOpen(false)}>
+                Get Started
+              </Link>
+            )}
           </div>
         </div>
       </div>
